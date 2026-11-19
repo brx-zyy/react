@@ -272,6 +272,35 @@ describe('ReactFlightDOMNode', () => {
     }
   });
 
+  // @gate enableTaint
+  it('serializes a tainted Buffer through its built-in toJSON method', async () => {
+    const secret = Buffer.from('TAINTED_BUFFER_SECRET_2b71', 'utf8');
+    ReactServer.experimental_taintObjectReference(
+      'This Buffer must not cross the Flight boundary.',
+      secret,
+    );
+
+    // Node Buffer.toJSON produces a fresh {type, data} object. The taint is
+    // registered against the original Buffer instance, not that replacement.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const stream = await serverAct(() =>
+        ReactServerDOMServer.renderToPipeableStream({secret}),
+      );
+      const readable = new Stream.PassThrough(streamOptions);
+      const response = ReactServerDOMClient.createFromNodeStream(readable, {
+        moduleMap: {},
+        moduleLoading: webpackModuleLoading,
+      });
+      stream.pipe(readable);
+
+      const decoded = await response;
+      expect(decoded.secret).toEqual(secret.toJSON());
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('should support web streams in node', async () => {
     function Text({children}) {
       return <span>{children}</span>;
