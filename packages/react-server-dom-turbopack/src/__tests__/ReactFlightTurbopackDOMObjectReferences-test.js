@@ -581,26 +581,39 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
-  it('can forge an object reference to another export in the same server module', async () => {
+  it('can forge an object reference to an unregistered object export in a server action module', async () => {
+    const hidden = {value: 'server-only'};
+    const action = jest.fn();
+    const ActionModule = serverExports({action, hidden});
     const visible = {value: 'visible'};
-    const hidden = {value: 'hidden'};
-    const ServerModule = serverObjectExports({visible, hidden});
+    const ReferenceModule = serverObjectExports({visible});
+
     const stream = await serverAct(() =>
       ReactServerDOMServer.renderToReadableStream(
-        {ref: ServerModule.visible},
+        {ref: ReferenceModule.visible, action: ActionModule.action},
         turbopackMap,
       ),
     );
-    const {ref} = await ReactServerDOMClient.createFromReadableStream(stream);
-    const body = await ReactServerDOMClient.encodeReply({ref});
+    const result = await ReactServerDOMClient.createFromReadableStream(stream);
+    const body = await ReactServerDOMClient.encodeReply({
+      ref: result.ref,
+      action: result.action,
+    });
 
-    // The client receives the module/export ID in the Flight metadata.
-    // Change only the export suffix to point at a different registered object.
+    // The action's module ID is visible in the reply metadata. Reuse that
+    // module ID but substitute an object export that was never registered
+    // with registerServerObjectReference and was never sent to the client.
     const model = JSON.parse(body.get('0'));
-    const metadataKey = model.ref.slice(2);
-    const metadata = JSON.parse(body.get(metadataKey));
-    metadata.id = ServerModule.hidden.$id;
-    body.set(metadataKey, JSON.stringify(metadata));
+    const objectMetadataKey = model.ref.slice(2);
+    const objectMetadata = JSON.parse(body.get(objectMetadataKey));
+    const actionMetadataKey = model.action.slice(2);
+    const actionMetadata = JSON.parse(body.get(actionMetadataKey));
+    const moduleId = actionMetadata.id.slice(
+      0,
+      actionMetadata.id.lastIndexOf('#'),
+    );
+    objectMetadata.id = moduleId + '#hidden';
+    body.set(objectMetadataKey, JSON.stringify(objectMetadata));
 
     const decoded = await ReactServerDOMServer.decodeReply(
       body,
@@ -608,6 +621,7 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
     );
     expect(decoded.ref).toBe(hidden);
     expect(decoded.ref).not.toBe(visible);
+    expect(action).not.toHaveBeenCalled();
   });
 
   // @gate enableFlightObjectReferences
