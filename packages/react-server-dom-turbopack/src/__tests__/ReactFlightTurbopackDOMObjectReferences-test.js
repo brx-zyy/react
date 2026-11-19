@@ -581,10 +581,9 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
-  it('can forge an object reference to an unregistered object export in a server action module', async () => {
-    const hidden = {value: 'server-only'};
-    const action = jest.fn();
-    const ActionModule = serverExports({action, hidden});
+  it('can forge an object reference to a server action module namespace', async () => {
+    const action = jest.fn(moduleExports => moduleExports.action);
+    const ActionModule = serverExports({action});
     const visible = {value: 'visible'};
     const ReferenceModule = serverObjectExports({visible});
 
@@ -600,28 +599,26 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
       action: result.action,
     });
 
-    // The action's module ID is visible in the reply metadata. Reuse that
-    // module ID but substitute an object export that was never registered
-    // with registerServerObjectReference and was never sent to the client.
+    // Reuse the known Server Action module ID but remove its export suffix.
+    // The module-level manifest entry resolves to the module namespace object.
     const model = JSON.parse(body.get('0'));
     const objectMetadataKey = model.ref.slice(2);
     const objectMetadata = JSON.parse(body.get(objectMetadataKey));
     const actionMetadataKey = model.action.slice(2);
     const actionMetadata = JSON.parse(body.get(actionMetadataKey));
-    const moduleId = actionMetadata.id.slice(
+    objectMetadata.id = actionMetadata.id.slice(
       0,
       actionMetadata.id.lastIndexOf('#'),
     );
-    objectMetadata.id = moduleId + '#hidden';
     body.set(objectMetadataKey, JSON.stringify(objectMetadata));
 
     const decoded = await ReactServerDOMServer.decodeReply(
       body,
       turbopackServerMap,
     );
-    expect(decoded.ref).toBe(hidden);
-    expect(decoded.ref).not.toBe(visible);
-    expect(action).not.toHaveBeenCalled();
+    expect(decoded.ref).toBe(ActionModule);
+    expect(decoded.ref.action).toBe(action);
+    expect(decoded.action(decoded.ref)).toBe(action);
   });
 
   // @gate enableFlightObjectReferences
