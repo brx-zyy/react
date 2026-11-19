@@ -231,6 +231,47 @@ describe('ReactFlightDOMNode', () => {
     return {moduleMap, moduleLoading: webpackModuleLoading};
   }
 
+  // @gate enableTaint
+  it('serializes a tainted class instance when its toJSON returns a plain object', async () => {
+    const secretMarker = 'TAINTED_TOJSON_SECRET_91c4';
+    class SecretRecord {
+      constructor() {
+        this.apiKey = secretMarker;
+      }
+      toJSON() {
+        return {apiKey: this.apiKey};
+      }
+    }
+
+    const secret = new SecretRecord();
+    ReactServer.experimental_taintObjectReference(
+      'This class instance must not cross the Flight boundary.',
+      secret,
+    );
+
+    // Custom toJSON values produce a DEV warning. Silence that warning here so
+    // the test focuses on whether the taint check blocks the original instance.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const stream = await serverAct(() =>
+        ReactServerDOMServer.renderToPipeableStream({secret}),
+      );
+      const readable = new Stream.PassThrough(streamOptions);
+      const response = ReactServerDOMClient.createFromNodeStream(readable, {
+        moduleMap: {},
+        moduleLoading: webpackModuleLoading,
+      });
+      stream.pipe(readable);
+
+      const decoded = await response;
+      // This is the suspected bypass: the original tainted instance was
+      // replaced by its toJSON result before renderModelDestructive checks it.
+      expect(decoded.secret).toEqual({apiKey: secretMarker});
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('should support web streams in node', async () => {
     function Text({children}) {
       return <span>{children}</span>;
