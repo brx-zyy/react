@@ -106,6 +106,64 @@ describe('ReactFlightAsyncDebugInfo', () => {
     return result;
   }
 
+  it('does not include another request's component props in Flight debug metadata', async () => {
+    if (!__DEV__ || !gate(flags => flags.enableComponentPerformanceTrack)) {
+      return;
+    }
+
+    const secretMarker = 'CROSS_REQUEST_SECRET_7f39a2';
+    let sharedPromise;
+    let resolveShared;
+
+    function Owner({secret}) {
+      sharedPromise = new Promise(resolve => {
+        resolveShared = resolve;
+      });
+      sharedPromise.displayName = 'shared-request-operation';
+      return 'owner response';
+    }
+
+    const ownerStream = ReactServerDOMServer.renderToPipeableStream(
+      <Owner secret={secretMarker} />,
+    );
+    const ownerReadable = new Stream.PassThrough(streamOptions);
+    let ownerOutput = '';
+    ownerReadable.on('data', chunk => {
+      ownerOutput += String(chunk);
+    });
+    ownerStream.pipe(ownerReadable);
+    await finishLoadingStream(ownerReadable);
+    expect(ownerOutput).toContain(secretMarker);
+
+    let notifyConsumerStarted;
+    const consumerStarted = new Promise(resolve => {
+      notifyConsumerStarted = resolve;
+    });
+
+    async function Consumer() {
+      notifyConsumerStarted();
+      await sharedPromise;
+      return 'consumer response';
+    }
+
+    const consumerStream = ReactServerDOMServer.renderToPipeableStream(
+      <Consumer />,
+    );
+    const consumerReadable = new Stream.PassThrough(streamOptions);
+    let consumerOutput = '';
+    consumerReadable.on('data', chunk => {
+      consumerOutput += String(chunk);
+    });
+    consumerStream.pipe(consumerReadable);
+
+    await consumerStarted;
+    resolveShared();
+    await finishLoadingStream(consumerReadable);
+
+    // The second response must not contain the first request's secret props.
+    expect(consumerOutput).not.toContain(secretMarker);
+  });
+
   it('can track async information when awaited', async () => {
     async function getData(text) {
       await delay(1);
