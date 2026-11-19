@@ -159,6 +159,7 @@ describe('ReactFlightAsyncDebugInfo', () => {
     await consumerStarted;
     resolveShared();
     await finishLoadingStream(consumerReadable);
+    expect(consumerOutput).toContain('shared-request-operation');
 
     // The second response must not contain the first request's secret props.
     expect(consumerOutput).not.toContain(secretMarker);
