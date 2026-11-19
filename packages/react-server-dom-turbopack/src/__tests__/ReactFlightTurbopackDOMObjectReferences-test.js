@@ -581,9 +581,12 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
-  it('can forge an object reference to a server action module namespace', async () => {
-    const action = jest.fn(moduleExports => moduleExports.action);
-    const ActionModule = serverExports({action});
+  it('can forge an object reference to an unregistered server module export', async () => {
+    const action = jest.fn(moduleExports => moduleExports.hidden.secret);
+    const ActionModule = serverExports({
+      action,
+      hidden: {secret: 'server-only-value'},
+    });
     const visible = {value: 'visible'};
     const ReferenceModule = serverObjectExports({visible});
 
@@ -600,7 +603,8 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
     });
 
     // Reuse the known Server Action module ID but remove its export suffix.
-    // The module-level manifest entry resolves to the module namespace object.
+    // The module-level manifest entry resolves to the module namespace object,
+    // including exports that were not registered as Server Object References.
     const model = JSON.parse(body.get('0'));
     const objectMetadataKey = model.ref.slice(2);
     const objectMetadata = JSON.parse(body.get(objectMetadataKey));
@@ -617,8 +621,8 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
       turbopackServerMap,
     );
     expect(decoded.ref).toBe(ActionModule);
-    expect(decoded.ref.action).toBe(action);
-    expect(decoded.action(decoded.ref)).toBe(action);
+    expect(decoded.action(decoded.ref)).toBe('server-only-value');
+    expect(action).toHaveBeenCalledWith(ActionModule);
   });
 
   // @gate enableFlightObjectReferences
