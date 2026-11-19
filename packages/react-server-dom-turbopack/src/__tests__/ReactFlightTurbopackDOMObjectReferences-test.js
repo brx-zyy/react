@@ -581,6 +581,52 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
+  // Audit probe: verify whether module-namespace resolution bypasses export registration.
+  it('can forge an object reference to an unregistered server module export', async () => {
+    const action = jest.fn(moduleExports => moduleExports.hidden.secret);
+    const ActionModule = serverExports({
+      action,
+      hidden: {secret: 'server-only-value'},
+    });
+    const visible = {value: 'visible'};
+    const ReferenceModule = serverObjectExports({visible});
+
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(
+        {ref: ReferenceModule.visible, action: ActionModule.action},
+        turbopackMap,
+      ),
+    );
+    const result = await ReactServerDOMClient.createFromReadableStream(stream);
+    const body = await ReactServerDOMClient.encodeReply({
+      ref: result.ref,
+      action: result.action,
+    });
+
+    // Reuse the known Server Action module ID but remove its export suffix.
+    // The module-level manifest entry resolves to the module namespace object,
+    // including exports that were not registered as Server Object References.
+    const model = JSON.parse(body.get('0'));
+    const objectMetadataKey = model.ref.slice(2);
+    const objectMetadata = JSON.parse(body.get(objectMetadataKey));
+    const actionMetadataKey = model.action.slice(2);
+    const actionMetadata = JSON.parse(body.get(actionMetadataKey));
+    objectMetadata.id = actionMetadata.id.slice(
+      0,
+      actionMetadata.id.lastIndexOf('#'),
+    );
+    body.set(objectMetadataKey, JSON.stringify(objectMetadata));
+
+    const decoded = await ReactServerDOMServer.decodeReply(
+      body,
+      turbopackServerMap,
+    );
+    expect(decoded.ref).toBe(ActionModule);
+    expect(decoded.action(decoded.ref)).toBe('server-only-value');
+    expect(action).toHaveBeenCalledWith(ActionModule);
+  });
+
+  // @gate enableFlightObjectReferences
   it('rejects an object reference missing from the receiving server manifest', async () => {
     const settings = {theme: 'dark'};
     const ServerModule = serverObjectExports({settings});
