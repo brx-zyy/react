@@ -581,6 +581,36 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
+  it('can forge an object reference to another export in the same server module', async () => {
+    const visible = {value: 'visible'};
+    const hidden = {value: 'hidden'};
+    const ServerModule = serverObjectExports({visible, hidden});
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(
+        {ref: ServerModule.visible},
+        turbopackMap,
+      ),
+    );
+    const {ref} = await ReactServerDOMClient.createFromReadableStream(stream);
+    const body = await ReactServerDOMClient.encodeReply({ref});
+
+    // The client receives the module/export ID in the Flight metadata.
+    // Change only the export suffix to point at a different registered object.
+    const model = JSON.parse(body.get('0'));
+    const metadataKey = model.ref.slice(2);
+    const metadata = JSON.parse(body.get(metadataKey));
+    metadata.id = ServerModule.hidden.$id;
+    body.set(metadataKey, JSON.stringify(metadata));
+
+    const decoded = await ReactServerDOMServer.decodeReply(
+      body,
+      turbopackServerMap,
+    );
+    expect(decoded.ref).toBe(hidden);
+    expect(decoded.ref).not.toBe(visible);
+  });
+
+  // @gate enableFlightObjectReferences
   it('rejects an object reference missing from the receiving server manifest', async () => {
     const settings = {theme: 'dark'};
     const ServerModule = serverObjectExports({settings});
