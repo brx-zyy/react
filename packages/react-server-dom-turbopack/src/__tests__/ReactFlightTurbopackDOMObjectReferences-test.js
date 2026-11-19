@@ -581,6 +581,7 @@ describe('ReactFlightTurbopackDOMObjectReferences', () => {
   });
 
   // @gate enableFlightObjectReferences
+  // Audit probe: verify whether module-namespace resolution bypasses export registration.
   it('can forge an object reference to an unregistered server module export', async () => {
     const action = jest.fn(moduleExports => moduleExports.hidden.secret);
     const ActionModule = serverExports({
